@@ -1,0 +1,7 @@
+variables:
+  NAME: homed-recorder
+  PACKAGE_EXTRA: mkdir -p deploy/data/opt/homed-recorder
+
+include:
+- project: 'homed/services/homed-common'
+  file: '.gitlab-ci/pipeline.yml'

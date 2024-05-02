@@ -1,0 +1,6 @@
+#!/bin/bash
+
+systemctl stop homed-recorder.service
+systemctl disable homed-recorder.service
+
+exit 0
