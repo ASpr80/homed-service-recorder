@@ -97,7 +97,7 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
             {
                 const Item &item = m_database->items().value(QString("%1/%2").arg(json.value("endpoint").toString(), json.value("property").toString()));
                 QList <Database::Record> list;
-                QJsonArray data;
+                QJsonArray timestamps, values;
                 qint64 time = QDateTime::currentMSecsSinceEpoch();
 
                 if (!item.isNull())
@@ -106,10 +106,11 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
                 for (int i = 0; i < list.count(); i++)
                 {
                     const Database::Record &record = list.at(i);
-                    data.append(QJsonObject {{"timestamp", record.timestamp}, {"value", record.value}});
+                    timestamps.append(record.timestamp);
+                    values.append(record.value);
                 }
 
-                mqttPublish(mqttTopic("recorder"), {{"data", data}, {"endpoint", item->endpoint()}, {"property", item->property()}, {"time", QDateTime::currentMSecsSinceEpoch() - time}});
+                mqttPublish(mqttTopic("recorder"), {{"id", json.value("id").toString()}, {"time", QDateTime::currentMSecsSinceEpoch() - time}, {"timestamps", timestamps}, {"values", values}});
                 break;
             }
         }
