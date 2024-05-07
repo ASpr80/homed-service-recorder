@@ -96,21 +96,42 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
             case Command::getData:
             {
                 const Item &item = m_database->items().value(QString("%1/%2").arg(json.value("endpoint").toString(), json.value("property").toString()));
-                QList <Database::Record> list;
-                QJsonArray timestamps, values;
+                QList <Database::DataRecord> dataList;
+                QList <Database::HourRecord> hourList;
                 qint64 time = QDateTime::currentMSecsSinceEpoch();
 
                 if (!item.isNull())
-                    m_database->getData(item, json.value("start").toVariant().toLongLong(), json.value("end").toVariant().toLongLong(), list);
+                    m_database->getData(item, json.value("start").toVariant().toLongLong(), json.value("end").toVariant().toLongLong(), dataList, hourList);
 
-                for (int i = 0; i < list.count(); i++)
+                if (!hourList.count())
                 {
-                    const Database::Record &record = list.at(i);
-                    timestamps.append(record.timestamp);
-                    values.append(record.value);
+                    QJsonArray timestamp, value;
+
+                    for (int i = 0; i < dataList.count(); i++)
+                    {
+                        const Database::DataRecord &record = dataList.at(i);
+                        timestamp.append(record.timestamp);
+                        value.append(record.value);
+                    }
+
+                    mqttPublish(mqttTopic("recorder"), {{"id", json.value("id").toString()}, {"time", QDateTime::currentMSecsSinceEpoch() - time}, {"timestamp", timestamp}, {"value", value}});
+                }
+                else
+                {
+                    QJsonArray timestamp, average, min, max;
+
+                    for (int i = 0; i < hourList.count(); i++)
+                    {
+                        const Database::HourRecord &record = hourList.at(i);
+                        timestamp.append(record.timestamp);
+                        average.append(record.average.toDouble());
+                        min.append(record.min.toDouble());
+                        max.append(record.max.toDouble());
+                    }
+
+                    mqttPublish(mqttTopic("recorder"), {{"id", json.value("id").toString()}, {"time", QDateTime::currentMSecsSinceEpoch() - time}, {"timestamp", timestamp}, {"average", average}, {"min", min}, {"max", max}});
                 }
 
-                mqttPublish(mqttTopic("recorder"), {{"id", json.value("id").toString()}, {"time", QDateTime::currentMSecsSinceEpoch() - time}, {"timestamps", timestamps}, {"values", values}});
                 break;
             }
         }

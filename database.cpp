@@ -17,8 +17,11 @@ Database::Database(QSettings *config, QObject *parent) : QObject(parent), m_time
     QSqlQuery query(m_db);
 
     m_db.setDatabaseName(config->value("database/file", "/opt/homed-recorder/homed-recorder.db").toString());
-    m_days = static_cast <quint16> (config->value("database/days", 7).toInt());
+    m_days = static_cast <quint16> (config->value("database/days").toInt());
     m_trigger = {"action", "event", "scene"};
+
+    if (!m_days)
+        m_days = 7;
 
     logInfo << "Using database" << m_db.databaseName() << "with" << m_days << "days purge inerval";
 
@@ -30,6 +33,7 @@ Database::Database(QSettings *config, QObject *parent) : QObject(parent), m_time
 
     query.exec("CREATE TABLE IF NOT EXISTS item (id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint TEXT NOT NULL, property TEXT NOT NULL, debounce INTEGER NOT NULL, threshold REAL NOT NULL)");
     query.exec("CREATE TABLE IF NOT EXISTS data (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER REFERENCES item(id) ON DELETE CASCADE, timestamp INTEGER NOT NULL, value TEXT NOT NULL)");
+    query.exec("CREATE TABLE IF NOT EXISTS hour (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER REFERENCES item(id) ON DELETE CASCADE, timestamp INTEGER NOT NULL, average REAL, min REAL, max REAL)");
     query.exec("CREATE UNIQUE INDEX item_index ON item (endpoint, property)");
 
     query.exec("PRAGMA foreign_keys = ON");
@@ -109,25 +113,31 @@ void Database::insertData(const Item &item, const QString &value)
         return;
 
     logInfo << "insert" << item->id() << item->endpoint() << item->property() << value;
-    m_queue.enqueue({item->id(), timestamp, value});
+    m_dataQueue.enqueue({item->id(), timestamp, value});
 
     item->setTimestamp(timestamp);
     item->setValue(value);
 }
 
-void Database::getData(const Item &item, qint64 start, qint64 end, QList<Record> &list)
+void Database::getData(const Item &item, qint64 start, qint64 end, QList <DataRecord> &dataList, QList <HourRecord> &hourList)
 {
-    QString queryString = QString("SELECT timestamp, value FROM data WHERE item_id = %1").arg(item->id());
     QSqlQuery query(m_db);
+    QString queryString;
+    bool check;
 
-    if (start)
+    if (start && m_days > ((end ? end : QDateTime::currentMSecsSinceEpoch()) - start) / 86400000)
     {
-        query.exec(QString(queryString).append(" AND timestamp <= %1 ORDER BY id DESC LIMIT 1").arg(start));
-        queryString.append(QString(" AND timestamp > %1").arg(start));
+        queryString = QString("SELECT timestamp, value FROM data WHERE item_id = %1").arg(item->id());
+        check = true;
+    }
+    else
+    {
+        queryString = QString("SELECT timestamp, average, min, max FROM hour WHERE item_id = %1").arg(item->id());
+        check = false;
     }
 
-    if (query.first())
-        list.append({item->id(), query.value(0).toLongLong(), query.value(1).toString()});
+    if (start)
+        queryString.append(QString(" AND timestamp > %1").arg(start));
 
     if (end)
         queryString.append(QString(" AND timestamp <= %1").arg(end));
@@ -135,25 +145,81 @@ void Database::getData(const Item &item, qint64 start, qint64 end, QList<Record>
     query.exec(queryString);
 
     while (query.next())
-        list.append({item->id(), query.value(0).toLongLong(), query.value(1).toString()});
+    {
+        if (check)
+            dataList.append({item->id(), query.value(0).toLongLong(), query.value(1).toString()});
+        else
+            hourList.append({item->id(), query.value(0).toLongLong(), query.value(1).toString(), query.value(2).toString(), query.value(3).toString()});
+    }
 }
 
 void Database::update(void)
 {
-    quint64 timestamp = QDateTime::currentSecsSinceEpoch();
+    qint64 timestamp = QDateTime::currentSecsSinceEpoch(), start = QDateTime::currentMSecsSinceEpoch();
     QSqlQuery query(m_db);
 
     query.exec("BEGIN TRANSACTION");
 
-    while (!m_queue.isEmpty())
+    while (!m_dataQueue.isEmpty())
     {
-        Record record = m_queue.dequeue();
+        DataRecord record = m_dataQueue.dequeue();
         query.exec(QString("INSERT INTO data (item_id, timestamp, value) VALUES (%1, %2, '%3')").arg(record.id).arg(record.timestamp).arg(record.value));
     }
 
     query.exec("COMMIT");
 
-    if (!m_days || timestamp % 3600 || QDateTime::currentDateTime().time().hour())
+    if (timestamp % 3600)
+        return;
+
+    query.exec(QString("SELECT item.id, AVG(data.value), MIN(data.value), MAX(data.value) FROM item LEFT JOIN data ON data.item_id = item.id AND data.timestamp > %1 GROUP by item.id").arg((timestamp - 3600) * 1000));
+
+    while(query.next())
+    {
+        quint32 id = static_cast <quint32> (query.value(0).toInt());
+
+        if (query.value(1).type() == QVariant::Double)
+        {
+            bool min, max;
+
+            query.value(2).toString().toDouble(&min);
+            query.value(3).toString().toDouble(&max);
+
+            if (!min || !max)
+                continue;
+
+            m_hourQueue.enqueue({id, timestamp * 1000, query.value(1).toString(), query.value(2).toString(),query.value(3).toString()});
+        }
+        else
+        {
+            QSqlQuery query(QString("SELECT value FROM data WHERE item_id = %1 ORDER BY id DESC limit 1").arg(id), m_db);
+
+            if (query.first() && query.value(0).toString() != UNAVAILABLE_STRING)
+            {
+                query.exec(QString("SELECT average, min, max FROM hour WHERE item_id = %1 AND average IS NOT NULL ORDER BY id DESC limit 1").arg(id));
+
+                if (query.first())
+                {
+                    m_hourQueue.enqueue({id, timestamp * 1000, query.value(0).toString(), query.value(1).toString(), query.value(2).toString()});
+                    continue;
+                }
+            }
+
+            m_hourQueue.enqueue({id,  timestamp * 1000, "null", "null", "null"});
+        }
+    }
+
+    query.exec("BEGIN TRANSACTION");
+
+    while (!m_hourQueue.isEmpty())
+    {
+        const HourRecord &record = m_hourQueue.dequeue();
+        query.exec(QString("INSERT INTO hour (item_id, timestamp, average, min, max) VALUES (%1, %2, %3, %4, %5)").arg(record.id).arg(record.timestamp).arg(record.average, record.min, record.max));
+    }
+
+    query.exec("COMMIT");
+    logInfo << "Hour data stored in" << QDateTime::currentMSecsSinceEpoch() - start << "ms";
+
+    if (QDateTime::currentDateTime().time().hour())
         return;
 
     query.exec(QString("DELETE FROM data WHERE timestamp < %1").arg((timestamp - m_days * 86400) * 1000));

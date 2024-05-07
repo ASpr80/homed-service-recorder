@@ -56,11 +56,18 @@ public:
     Database(QSettings *config, QObject *parent);
     ~Database(void);
 
-    struct Record
+    struct DataRecord
     {
         quint32 id;
         qint64  timestamp;
         QString value;
+    };
+
+    struct HourRecord
+    {
+        quint32 id;
+        qint64  timestamp;
+        QString average, min, max;
     };
 
     inline QMap <QString, Item> &items(void) { return m_items; }
@@ -69,7 +76,7 @@ public:
     bool removeItem(const QString &endpoint, const QString &property);
 
     void insertData(const Item &item, const QString &value);
-    void getData(const Item &item, qint64 start, qint64 end, QList <Record> &list);
+    void getData(const Item &item, qint64 start, qint64 end, QList <DataRecord> &dataList, QList <HourRecord> &hourList);
 
 private:
 
@@ -79,7 +86,9 @@ private:
 
     QList <QString> m_trigger;
     QMap <QString, Item> m_items;
-    QQueue <Record> m_queue;
+
+    QQueue <DataRecord> m_dataQueue;
+    QQueue <HourRecord> m_hourQueue;
 
 private slots:
 
