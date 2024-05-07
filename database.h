@@ -67,7 +67,7 @@ public:
     {
         quint32 id;
         qint64  timestamp;
-        QString average, min, max;
+        QString avg, min, max;
     };
 
     inline QMap <QString, Item> &items(void) { return m_items; }
