@@ -7,30 +7,23 @@ Controller::Controller(const QString &configFile) : HOMEd(configFile), m_databas
     logInfo << "Configuration file is" << getConfig()->fileName();
 
     m_services = {"zigbee", "modbus", "custom"};
+    connect(m_database, &Database::itemAdded, this, &Controller::itemAdded);
 }
 
-QString Controller::endpointName(const QString &endpoint)
+QString Controller::deviceId(const QString &device)
 {
-    QList <QString> search = endpoint.split('/');
-
-    for (auto it = m_devices.begin(); it != m_devices.end(); it++)
+    if (!m_devices.contains(device))
     {
-        QList <QString> list = it.key().split('/');
+        QList <QString> list = device.split('/');
 
-        if (list.value(0) != search.value(0))
-            continue;
+        for (auto it = m_devices.begin(); it != m_devices.end(); it++)
+            if (it.value().name == list.value(1))
+                return it.key();
 
-        if (list.value(1) == search.value(1))
-            return endpoint;
-
-        if (it.value() == search.value(1))
-        {
-            search.replace(1, list.value(1));
-            return search.join('/');
-        }
+        return QString();
     }
 
-    return QString();
+    return device;
 }
 
 void Controller::publishItems(void)
@@ -166,7 +159,7 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
             key = QString("%1/%2").arg(service, id);
             item =  names ? name : id;
 
-            if (m_devices.contains(key) && m_devices.value(key) != name)
+            if (m_devices.contains(key) && m_devices.value(key).name != name)
             {
                 mqttUnsubscribe(mqttTopic("device/%1/%2").arg(service, item));
                 mqttUnsubscribe(mqttTopic("fd/%1/%2").arg(service, item));
@@ -179,20 +172,26 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
                 mqttSubscribe(mqttTopic("device/%1/%2").arg(service, item));
                 mqttSubscribe(mqttTopic("fd/%1/%2").arg(service, item));
                 mqttSubscribe(mqttTopic("fd/%1/%2/#").arg(service, item));
-                m_devices.insert(key, name);
+                m_devices.insert(key, {name, true});
             }
         }
     }
     else if (subTopic.startsWith("device/"))
     {
-        QString endpoint = endpointName(subTopic.mid(subTopic.indexOf('/') + 1));
+        QString device = deviceId(subTopic.split('/').mid(1, 2).join('/'));
+        auto it = m_devices.find(device);
 
-        if (endpoint.isEmpty() || json.value("status").toString() == "online")
+        if (it == m_devices.end())
+            return;
+
+        it.value().available = json.value("status").toString() == "online" ? true : false;
+
+        if (it.value().available)
             return;
 
         for (auto it = m_database->items().begin(); it != m_database->items().end(); it++)
         {
-            if (!it.key().startsWith(endpoint))
+            if (!it.key().startsWith(device))
                 continue;
 
             m_database->insertData(it.value(), UNAVAILABLE_STRING);
@@ -200,14 +199,19 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
     }
     else if (subTopic.startsWith("fd/"))
     {
-        QString endpoint = endpointName(subTopic.mid(subTopic.indexOf('/') + 1));
+        QList <QString> list = subTopic.split('/');
+        QString id = deviceId(list.mid(1, 2).join('/'));
+        auto it = m_devices.find(id);
 
-        if (endpoint.isEmpty())
+        if (it == m_devices.end() || !it.value().available)
             return;
+
+        if (!list.value(3).isEmpty())
+            id.append(QString("/%1").arg(list.value(3)));
 
         for (auto it = json.begin(); it != json.end(); it++)
         {
-            const Item &item = m_database->items().value(QString("%1/%2").arg(endpoint, it.key()));
+            const Item &item = m_database->items().value(QString("%1/%2").arg(id, it.key()));
 
             if (item.isNull())
                 continue;
@@ -215,4 +219,19 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
             m_database->insertData(item, it.value().toVariant().toString());
         }
     }
+}
+
+void Controller::itemAdded(const Item &item)
+{
+    QList <QString> list = item->endpoint().split('/');
+    QString device = deviceId(list.mid(0, 2).join('/'));
+    auto it = m_devices.find(device);
+
+    if (it == m_devices.end() || !it.value().available)
+    {
+        m_database->insertData(item, UNAVAILABLE_STRING);
+        return;
+    }
+
+    mqttPublish(mqttTopic("command/%1").arg(list.value(0)), {{"action", "getProperties"}, {"device", list.value(1)}, {"service", "recorder"}});
 }

@@ -94,6 +94,10 @@ private slots:
 
     void update(void);
 
+signals:
+
+    void itemAdded(const Item &item);
+
 };
 
 #endif

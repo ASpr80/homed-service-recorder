@@ -77,6 +77,7 @@ bool Database::updateItem(const QString &endpoint, const QString &property, quin
             return false;
 
         m_items.insert(key, Item(new ItemObject(static_cast <qint32> (query.lastInsertId().toInt()), endpoint, property, debounce, threshold)));
+        emit itemAdded(m_items.value(key));
     }
 
     return true;
