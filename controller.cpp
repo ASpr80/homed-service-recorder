@@ -178,16 +178,21 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
     }
     else if (subTopic.startsWith("device/"))
     {
+        bool status = json.value("status").toString() == "online" ? true : false;
         QString device = deviceId(subTopic.split('/').mid(1, 2).join('/'));
         auto it = m_devices.find(device);
 
-        if (it == m_devices.end())
+        if (it == m_devices.end() || it.value().available == status)
             return;
 
-        it.value().available = json.value("status").toString() == "online" ? true : false;
+        it.value().available = status;
 
         if (it.value().available)
+        {
+            QList <QString> list = it.key().split('/');
+            mqttPublish(mqttTopic("command/%1").arg(list.value(0)), {{"action", "getProperties"}, {"device", list.value(1)}, {"service", "recorder"}});
             return;
+        }
 
         for (auto it = m_database->items().begin(); it != m_database->items().end(); it++)
         {
