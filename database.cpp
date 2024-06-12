@@ -223,6 +223,6 @@ void Database::update(void)
     if (QDateTime::currentDateTime().time().hour())
         return;
 
-    query.exec(QString("DELETE FROM data WHERE timestamp < %1").arg((timestamp - m_days * 86400) * 1000));
+    query.exec(QString("DELETE FROM data WHERE timestamp < %1 AND ID NOT IN (SELECT MAX(id) FROM data WHERE timestamp < %1 GROUP BY item_id)").arg((timestamp - m_days * 86400) * 1000));
     query.exec("VACUUM");
 }
