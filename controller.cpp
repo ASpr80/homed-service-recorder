@@ -209,7 +209,12 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
         auto it = m_devices.find(id);
 
         if (it == m_devices.end() || !it.value().available)
+        {
+            if (m_database->debug())
+                logWarning << "No device found for topic" << subTopic;
+
             return;
+        }
 
         if (!list.value(3).isEmpty())
             id.append(QString("/%1").arg(list.value(3)));
@@ -220,6 +225,9 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
 
             if (item.isNull())
                 continue;
+
+            if (m_database->debug())
+                logInfo << "Endpoint" << id << "property" << it.key() << "item found";
 
             m_database->insertData(item, it.value().toVariant().toString());
         }

@@ -18,6 +18,7 @@ Database::Database(QSettings *config, QObject *parent) : QObject(parent), m_time
 
     m_db.setDatabaseName(config->value("database/file", "/opt/homed-recorder/homed-recorder.db").toString());
     m_days = static_cast <quint16> (config->value("database/days").toInt());
+    m_debug = config->value("database/debug", false).toBool();
     m_trigger = {"action", "event", "scene"};
 
     if (!m_days)
@@ -111,9 +112,17 @@ void Database::insertData(const Item &item, const QString &value)
     }
 
     if (item->timestamp() > timestamp || (item->value() == value && !m_trigger.contains(item->property())) || item->skip(timestamp, value.toDouble()))
+    {
+        if (m_debug)
+            logInfo << "Endpoint" << item->endpoint() << "property" << item->property() << "value" << value << "ignored";
+
         return;
+    }
 
     m_dataQueue.enqueue({item->id(), timestamp, value});
+
+    if (m_debug)
+        logInfo << "Endpoint" << item->endpoint() << "property" << item->property() << "value" << value << "record enqueued";
 
     item->setTimestamp(timestamp);
     item->setValue(value);

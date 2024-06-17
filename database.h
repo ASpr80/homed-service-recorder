@@ -70,6 +70,7 @@ public:
         QString avg, min, max;
     };
 
+    inline bool debug(void) { return m_debug; }
     inline QMap <QString, Item> &items(void) { return m_items; }
 
     bool updateItem(const QString &endpoint, const QString &property, quint32 debounce, double threshold);
@@ -83,6 +84,7 @@ private:
     QTimer *m_timer;
     QSqlDatabase m_db;
     quint16 m_days;
+    bool m_debug;
 
     QList <QString> m_trigger;
     QMap <QString, Item> m_items;
