@@ -6,24 +6,17 @@ Controller::Controller(const QString &configFile) : HOMEd(configFile), m_databas
     logInfo << "Starting version" << SERVICE_VERSION;
     logInfo << "Configuration file is" << getConfig()->fileName();
 
-    m_services = {"zigbee", "modbus", "custom"};
+    m_types = {"zigbee", "modbus", "custom"};
     connect(m_database, &Database::itemAdded, this, &Controller::itemAdded);
 }
 
-QString Controller::deviceId(const QString &device)
+Device Controller::findDevice(const QString &search)
 {
-    if (!m_devices.contains(device))
-    {
-        QList <QString> list = device.split('/');
+    for (auto it = m_devices.begin(); it != m_devices.end(); it++)
+        if (search.startsWith(it.value()->key()) || search.startsWith(it.value()->topic()))
+            return it.value();
 
-        for (auto it = m_devices.begin(); it != m_devices.end(); it++)
-            if (it.value().name == list.value(1))
-                return it.key();
-
-        return QString();
-    }
-
-    return device;
+    return Device();
 }
 
 void Controller::publishItems(void)
@@ -131,22 +124,23 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
     }
     else if (subTopic.startsWith("status/"))
     {
-        QString service = subTopic.split('/').value(1);
+        QString type = subTopic.split('/').value(1), service = subTopic.mid(subTopic.indexOf('/') + 1);
         QJsonArray devices = json.value("devices").toArray();
         bool names = json.value("names").toBool();
 
-        if (!m_services.contains(service))
+        if (!m_types.contains(type))
             return;
 
         for (auto it = devices.begin(); it != devices.end(); it++)
         {
             QJsonObject device = it->toObject();
-            QString name = device.value("name").toString(), id, key, item;
+            QString name = device.value("name").toString(), id, key, topic;
+            bool check = false;
 
-            if (device.value("removed").toBool())
+            if (type == "zigbee" && (device.value("removed").toBool() || !device.value("logicalType").toInt()))
                 continue;
 
-            switch (m_services.indexOf(service))
+            switch (m_types.indexOf(type))
             {
                 case 0: id = device.value("ieeeAddress").toString(); break; // zigbee
                 case 1: id = QString("%1.%2").arg(device.value("portId").toInt()).arg(device.value("slaveId").toInt()); break; // modbus
@@ -156,96 +150,95 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
             if (name.isEmpty())
                 name = id;
 
-            key = QString("%1/%2").arg(service, id);
-            item = names ? name : id;
+            key = QString("%1/%2").arg(type, id);
+            topic = QString("%1/%2").arg(service, names ? name : id);
 
-            if (names && m_devices.contains(key) && m_devices.value(key).name != name)
+            if (names && m_devices.contains(key) && m_devices.value(key)->topic() != topic)
             {
-                mqttUnsubscribe(mqttTopic("device/%1/%2").arg(service, item));
-                mqttUnsubscribe(mqttTopic("fd/%1/%2").arg(service, item));
-                mqttUnsubscribe(mqttTopic("fd/%1/%2/#").arg(service, item));
-                m_devices.remove(key);
+                const Device &device = m_devices.value(key);
+                mqttUnsubscribe(mqttTopic("device/%1").arg(device->topic()));
+                mqttUnsubscribe(mqttTopic("fd/%1").arg(device->topic()));
+                mqttUnsubscribe(mqttTopic("fd/%1/#").arg(device->topic()));
+                device->setTopic(topic);
+                check = true;
             }
 
             if (!m_devices.contains(key))
             {
-                mqttSubscribe(mqttTopic("device/%1/%2").arg(service, item));
-                mqttSubscribe(mqttTopic("fd/%1/%2").arg(service, item));
-                mqttSubscribe(mqttTopic("fd/%1/%2/#").arg(service, item));
+                m_devices.insert(key, Device(new DeviceObject(key, topic)));
+                check = true;
             }
 
-            m_devices.insert(key, {name, m_devices.contains(key) ? m_devices.value(key).available : true});
+            if (check)
+            {
+                mqttSubscribe(mqttTopic("device/%1").arg(topic));
+                mqttSubscribe(mqttTopic("fd/%1").arg(topic));
+                mqttSubscribe(mqttTopic("fd/%1/#").arg(topic));
+            }
         }
     }
     else if (subTopic.startsWith("device/"))
     {
-        bool status = json.value("status").toString() == "online" ? true : false;
-        QString device = deviceId(subTopic.split('/').mid(1, 2).join('/'));
-        auto it = m_devices.find(device);
+        const Device &device = findDevice(subTopic.mid(subTopic.indexOf('/') + 1));
 
-        if (it == m_devices.end() || it.value().available == status)
-            return;
-
-        it.value().available = status;
-
-        if (it.value().available)
+        if (!device.isNull())
         {
-            QList <QString> list = it.key().split('/');
-            mqttPublish(mqttTopic("command/%1").arg(list.value(0)), {{"action", "getProperties"}, {"device", list.value(1)}, {"service", "recorder"}});
-            return;
-        }
+            bool status = json.value("status").toString() == "online" ? true : false;
 
-        for (auto it = m_database->items().begin(); it != m_database->items().end(); it++)
-        {
-            if (!it.key().startsWith(device))
-                continue;
+            if (device->available() == status)
+                return;
 
-            m_database->insertData(it.value(), UNAVAILABLE_STRING);
+            device->setAvailable(status);
+
+            if (device->available())
+            {
+                mqttPublish(mqttTopic("command/%1").arg(device->topic().mid(0, device->topic().lastIndexOf('/'))), {{"action", "getProperties"}, {"device", device->topic().split('/').last()}, {"service", "recorder"}});
+                return;
+            }
+
+            for (auto it = m_database->items().begin(); it != m_database->items().end(); it++)
+            {
+                if (!it.key().startsWith(device->key()))
+                    continue;
+
+                m_database->insertData(it.value(), UNAVAILABLE_STRING);
+            }
         }
     }
     else if (subTopic.startsWith("fd/"))
     {
-        QList <QString> list = subTopic.split('/');
-        QString id = deviceId(list.mid(1, 2).join('/'));
-        auto it = m_devices.find(id);
+        const Device &device = findDevice(subTopic.mid(subTopic.indexOf('/') + 1));
 
-        if (it == m_devices.end() || !it.value().available)
+        if (!device.isNull())
         {
-            if (m_database->debug())
-                logWarning << "No device found for topic" << subTopic;
+            quint8 endpointId = static_cast <quint8> (subTopic.split('/').last().toInt());
+            QString key = endpointId ? QString("%1/%2").arg(device->key()).arg(endpointId) : device->key();
 
-            return;
-        }
+            for (auto it = json.begin(); it != json.end(); it++)
+            {
+                const Item &item = m_database->items().value(QString("%1/%2").arg(key, it.key()));
 
-        if (!list.value(3).isEmpty())
-            id.append(QString("/%1").arg(list.value(3)));
+                if (item.isNull())
+                    continue;
 
-        for (auto it = json.begin(); it != json.end(); it++)
-        {
-            const Item &item = m_database->items().value(QString("%1/%2").arg(id, it.key()));
+                if (m_database->debug())
+                    logInfo << "Endpoint" << endpointId << "property" << it.key() << "item found";
 
-            if (item.isNull())
-                continue;
-
-            if (m_database->debug())
-                logInfo << "Endpoint" << id << "property" << it.key() << "item found";
-
-            m_database->insertData(item, it.value().toVariant().toString());
+                m_database->insertData(item, it.value().toVariant().toString());
+            }
         }
     }
 }
 
 void Controller::itemAdded(const Item &item)
 {
-    QList <QString> list = item->endpoint().split('/');
-    QString device = deviceId(list.mid(0, 2).join('/'));
-    auto it = m_devices.find(device);
+    const Device &device = findDevice(item->endpoint());
 
-    if (it == m_devices.end() || !it.value().available)
+    if (device.isNull() || !device->available())
     {
         m_database->insertData(item, UNAVAILABLE_STRING);
         return;
     }
 
-    mqttPublish(mqttTopic("command/%1").arg(list.value(0)), {{"action", "getProperties"}, {"device", list.value(1)}, {"service", "recorder"}});
+    mqttPublish(mqttTopic("command/%1").arg(device->topic().mid(0, device->topic().lastIndexOf('/'))), {{"action", "getProperties"}, {"device", device->topic().split('/').last()}, {"service", "recorder"}});
 }

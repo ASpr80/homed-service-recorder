@@ -6,6 +6,32 @@
 #include "database.h"
 #include "homed.h"
 
+class DeviceObject;
+typedef QSharedPointer <DeviceObject> Device;
+
+class DeviceObject
+{
+
+public:
+
+    DeviceObject(const QString &key, const QString &topic) :
+        m_key(key), m_topic(topic), m_available(true) {}
+
+    inline QString key(void) { return m_key; }
+
+    inline QString topic(void) { return m_topic; }
+    inline void setTopic(const QString &value) { m_topic = value; }
+
+    inline bool available(void) { return m_available; }
+    inline void setAvailable(bool value) { m_available = value; }
+
+private:
+
+    QString m_key, m_topic;
+    bool m_available;
+
+};
+
 class Controller : public HOMEd
 {
     Q_OBJECT
@@ -35,10 +61,10 @@ private:
     Database *m_database;
     QMetaEnum m_commands;
 
-    QList <QString> m_services;
-    QMap <QString, DeviceStruct> m_devices;
+    QList <QString> m_types;
+    QMap <QString, Device> m_devices;
 
-    QString deviceId(const QString &search);
+    Device findDevice(const QString &search);
     void publishItems(void);
 
 private slots:
