@@ -2,6 +2,7 @@
 #define DATABASE_H
 
 #define UNAVAILABLE_STRING  "[unavailable]"
+#define DATA_INDEX_LIMIT    100000
 
 #include <QtSql>
 

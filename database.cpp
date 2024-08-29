@@ -184,6 +184,14 @@ void Database::update(void)
     if (timestamp % 3600)
         return;
 
+    query.exec("SELECT count(*) from data");
+
+    if (query.first() && query.value(0).toInt() > DATA_INDEX_LIMIT)
+    {
+        query.exec("CREATE INDEX data_index ON data (item_id, timestamp)");
+        query.exec("REINDEX data");
+    }
+
     query.exec(QString("SELECT item.id, AVG(data.value), MIN(data.value), MAX(data.value) FROM item LEFT JOIN data ON data.item_id = item.id AND data.timestamp > %1 GROUP by item.id").arg((timestamp - 3600) * 1000));
 
     while(query.next())
