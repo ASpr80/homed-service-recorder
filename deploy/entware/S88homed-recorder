@@ -4,6 +4,7 @@ ENABLED=yes
 PROCS=homed-recorder
 ARGS="-c /opt/etc/homed/homed-recorder.conf"
 PREARGS=""
+PRECMD="export QT_PLUGIN_PATH=/opt/lib/qt5/plugins"
 DESC=$PROCS
 PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
