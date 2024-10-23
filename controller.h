@@ -1,7 +1,7 @@
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
-#define SERVICE_VERSION     "1.0.6"
+#define SERVICE_VERSION     "1.0.7"
 
 #include "database.h"
 #include "homed.h"
@@ -21,6 +21,7 @@ public:
 
     inline QString topic(void) { return m_topic; }
     inline void setTopic(const QString &value) { m_topic = value; }
+    inline void clearTopic(void) { m_topic.clear(); }
 
     inline bool available(void) { return m_available; }
     inline void setAvailable(bool value) { m_available = value; }
