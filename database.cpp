@@ -133,13 +133,12 @@ void Database::getData(const Item &item, qint64 start, qint64 end, QList <DataRe
     QSqlQuery query(m_db);
     QString queryString;
     bool check = false;
+    qint64 last = 0;
 
     if (start && m_days >= ((end ? end : QDateTime::currentMSecsSinceEpoch()) - start) / 86400000)
     {
         queryString = QString("SELECT timestamp, value FROM data WHERE item_id = %1").arg(item->id());
-
-        if (start)
-            query.exec(QString(queryString).append(" AND timestamp <= %1 ORDER BY id DESC LIMIT 1").arg(start));
+        query.exec(QString(queryString).append(" AND timestamp <= %1 ORDER BY id DESC LIMIT 1").arg(start));
 
         if (query.first())
             dataList.append({item->id(), query.value(0).toLongLong(), query.value(1).toString()});
@@ -159,10 +158,17 @@ void Database::getData(const Item &item, qint64 start, qint64 end, QList <DataRe
 
     while (query.next())
     {
+        qint64 timestamp = query.value(0).toLongLong();
+
+        if (last > timestamp)
+            continue;
+
         if (check)
             dataList.append({item->id(), query.value(0).toLongLong(), query.value(1).toString()});
         else
             hourList.append({item->id(), query.value(0).toLongLong(), query.value(1).toString(), query.value(2).toString(), query.value(3).toString()});
+
+        last = timestamp;
     }
 }
 
