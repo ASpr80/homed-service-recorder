@@ -200,7 +200,7 @@ void Database::update(void)
 
     query.exec(QString("SELECT item.id, AVG(data.value), MIN(data.value), MAX(data.value) FROM item LEFT JOIN data ON data.item_id = item.id AND data.timestamp > %1 GROUP by item.id").arg((timestamp - 3600) * 1000));
 
-    while(query.next())
+    while (query.next())
     {
         quint32 id = static_cast <quint32> (query.value(0).toInt());
 
