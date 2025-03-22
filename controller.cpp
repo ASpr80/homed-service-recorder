@@ -42,7 +42,7 @@ void Controller::mqttConnected(void)
 
 void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &topic)
 {
-    QString subTopic = topic.name().replace(mqttTopic(), QString());
+    QString subTopic = topic.name().replace(0, mqttTopic().length(), QString());
     QJsonObject json = QJsonDocument::fromJson(message).object();
 
     if (subTopic == "command/recorder") // TODO: publish events
@@ -56,6 +56,7 @@ void Controller::mqttReceived(const QByteArray &message, const QMqttTopicName &t
                 QCoreApplication::exit(EXIT_RESTART);
                 break;
             }
+
             case Command::updateItem:
             {
                 if (!m_database->updateItem(json.value("endpoint").toString(), json.value("property").toString(), static_cast <quint32> (json.value("debounce").toInt()), json.value("threshold").toDouble()))
