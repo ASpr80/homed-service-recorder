@@ -1,11 +1,8 @@
 #include "controller.h"
 #include "logger.h"
 
-Controller::Controller(const QString &configFile) : HOMEd(configFile), m_database(new Database(getConfig(), this)), m_commands(QMetaEnum::fromType <Command> ())
+Controller::Controller(const QString &configFile) : HOMEd(SERVICE_VERSION, configFile), m_database(new Database(getConfig(), this)), m_commands(QMetaEnum::fromType <Command> ())
 {
-    logInfo << "Starting version" << SERVICE_VERSION;
-    logInfo << "Configuration file is" << getConfig()->fileName();
-
     m_types = {"zigbee", "modbus", "custom"};
     connect(m_database, &Database::itemAdded, this, &Controller::itemAdded);
 }
