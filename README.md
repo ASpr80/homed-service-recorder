@@ -1,4 +1,5 @@
 ![HOMEd Recorder](.github/logo.png)
+
 # HOMEd Recorder
 
 Для компиляции необходим базовый проект:\
